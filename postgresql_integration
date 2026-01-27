@@ -1,0 +1,184 @@
+# PostgreSQL Integration Guide for SBI Test Data Platform
+
+This guide provides the complete code required to migrate your backend from an in-memory database to a production-ready PostgreSQL database.
+
+---
+
+## 1. Install Required Libraries
+
+First, you need to install the database drivers and ORM (Object Relational Mapper).
+
+```bash
+pip install sqlalchemy psycopg2-binary
+```
+
+Add these to your `requirements.txt`:
+```txt
+sqlalchemy==2.0.25
+psycopg2-binary==2.9.9
+```
+
+---
+
+## 2. Database Configuration (`backend/database.py`)
+
+Create a new file `backend/database.py` to handle the database connection.
+
+```python
+from sqlalchemy import create_engine
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker
+import os
+
+# Update with your actual PostgreSQL credentials
+# Format: postgresql://username:password@host:port/database_name
+SQLALCHEMY_DATABASE_URL = "postgresql://postgres:admin123@localhost:5432/sbi_testdata"
+
+engine = create_engine(SQLALCHEMY_DATABASE_URL)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+Base = declarative_base()
+
+# Dependency to get database session per request
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+```
+
+---
+
+## 3. Database Models (`backend/models.py`)
+
+Create a new file `backend/models.py` to define your database tables.
+
+```python
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, JSON, ForeignKey
+from sqlalchemy.orm import relationship
+from datetime import datetime
+from .database import Base
+
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, index=True)
+    username = Column(String, unique=True, index=True)
+    hashed_password = Column(String)
+    first_name = Column(String)
+    last_name = Column(String)
+    department_code = Column(Integer)
+    role = Column(String, default="user")  # 'admin' or 'user'
+    is_locked = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    created_by = Column(String)
+    last_login = Column(DateTime, nullable=True)
+
+class ActivityLog(Base):
+    __tablename__ = "activity_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    username = Column(String, index=True)
+    action = Column(String, index=True)
+    details = Column(JSON)
+    timestamp = Column(DateTime, default=datetime.utcnow)
+    status = Column(String)  # 'success' or 'failed'
+```
+
+---
+
+## 4. Main Application (`backend/main.py`)
+
+Here is how you update your `main.py` to use the database instead of the in-memory dictionaries.
+
+### A. New Imports
+
+```python
+from sqlalchemy.orm import Session
+from .database import engine, get_db
+from . import models
+
+# Create tables automatically on startup
+models.Base.metadata.create_all(bind=engine)
+```
+
+### B. Helper Functions Update
+
+Replace the in-memory `log_user_activity` with a database version:
+
+```python
+def log_user_activity(db: Session, username: str, action: str, details: dict, status: str = "success"):
+    db_log = models.ActivityLog(
+        username=username,
+        action=action,
+        details=details,
+        status=status,
+        timestamp=datetime.now()
+    )
+    db.add(db_log)
+    db.commit()
+    db.refresh(db_log)
+```
+
+### C. Helper endpoint dependency update
+
+Update endpoints to accept the database session:
+
+```python
+@app.post("/create_cif")
+async def create_cif(
+    request: CIFRequest, 
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db)  # NEW dependency
+):
+    # ... logic ...
+    
+    # Log to database
+    log_user_activity(db, current_user.username, "create_cif", details)
+    
+    return results
+```
+
+### D. Admin User Management Code (PostgreSQL Version)
+
+```python
+@app.get("/admin/users")
+async def admin_list_users(
+    current_user: dict = Depends(require_admin),
+    db: Session = Depends(get_db)
+):
+    users = db.query(models.User).all()
+    return users
+
+@app.post("/admin/users/{username}/lock")
+async def admin_lock_user(
+    username: str, 
+    current_user: dict = Depends(require_admin),
+    db: Session = Depends(get_db)
+):
+    user = db.query(models.User).filter(models.User.username == username).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+        
+    user.is_locked = True
+    db.commit()
+    
+    log_user_activity(db, current_user.username, "lock_user", {"target": username})
+    return {"status": "success"}
+```
+
+---
+
+## 5. Deployment Checklist
+
+1.  [ ] Install PostgreSQL Server
+2.  [ ] Create database named `sbi_testdata`
+3.  [ ] Update connection string in `backend/database.py`
+4.  [ ] Run application (FastAPI will auto-create tables)
+5.  [ ] Create initial admin user via direct SQL insert or script:
+
+```sql
+INSERT INTO users (username, hashed_password, first_name, last_name, department_code, role, is_locked)
+VALUES ('admin', 'hashed_pass_here', 'System', 'Admin', 0, 'admin', false);
+```
