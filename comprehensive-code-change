@@ -1,0 +1,267 @@
+# Admin Panel Implementation - Consolidated Code Guide
+
+This document contains all the necessary code changes you need to apply to your actual project to add the Admin Panel features.
+
+---
+
+## 1. BACKEND CHANGES (`main.py`)
+
+### A. Add New Imports
+Add these imports at the top of your `main.py`:
+
+```python
+from fastapi import FastAPI, HTTPException, Depends, File, UploadFile, Query
+from fastapi.middleware.cors import CORSMiddleware
+# ... existing imports ...
+import hashlib  # Ensure this is imported
+from datetime import datetime, timedelta
+```
+
+### B. Update Middleware (RBAC)
+Add the `require_admin` dependency function:
+
+```python
+async def get_current_user(token: str = Depends(oauth2_scheme)):
+    # ... existing validation ...
+    # decoding and validating token...
+    
+    # CHANGE: Return user object instead of just username
+    user = users_db.get(username)
+    if not user:
+        raise credentials_exception
+    return user
+
+# NEW FUNCTION
+async def require_admin(current_user: dict = Depends(get_current_user)):
+    if current_user.get("role") != "admin":
+        raise HTTPException(
+            status_code=403, 
+            detail="Admin access required"
+        )
+    return current_user
+```
+
+### C. Update Login Endpoint (`/token`)
+Add the check for locked accounts:
+
+```python
+@app.post("/token", response_model=Token)
+async def login(form_data: OAuth2PasswordRequestForm = Depends()):
+    # ... verify user exists and password correct ...
+    
+    # NEW CHECK
+    if user.get("is_locked", False):
+        raise HTTPException(
+            status_code=403,
+            detail="Account is locked. Please contact administrator.",
+        )
+    
+    # Update last login
+    user["last_login"] = datetime.now().isoformat()
+    
+    # ... create token ...
+```
+
+### D. New Admin Endpoints
+Add these new endpoints to your API:
+
+```python
+# ============================================================================
+# ADMIN PANEL ENDPOINTS
+# ============================================================================
+
+@app.get("/admin/users")
+async def admin_list_users(current_user: dict = Depends(require_admin)):
+    """List all users (Admin only)"""
+    users_list = []
+    for username, user_data in users_db.items():
+        users_list.append({
+            "username": username,
+            "firstName": user_data["first_name"],
+            "lastName": user_data["last_name"],
+            "departmentCode": user_data["department_code"],
+            "role": user_data.get("role", "user"),
+            "isLocked": user_data.get("is_locked", False),
+            "createdAt": user_data.get("created_at"),
+            "lastLogin": user_data.get("last_login")
+        })
+    return users_list
+
+@app.post("/admin/users/{username}/lock")
+async def admin_lock_user(username: str, current_user: dict = Depends(require_admin)):
+    """Lock user account (Admin only)"""
+    if username not in users_db:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    if username == "admin":
+        raise HTTPException(status_code=400, detail="Cannot lock main admin account")
+        
+    users_db[username]["is_locked"] = True
+    
+    # Log activity
+    log_user_activity(current_user["username"], "lock_user", {"target_user": username})
+                     
+    return {"message": f"User {username} has been locked", "status": "success"}
+
+@app.post("/admin/users/{username}/unlock")
+async def admin_unlock_user(username: str, current_user: dict = Depends(require_admin)):
+    """Unlock user account (Admin only)"""
+    if username not in users_db:
+        raise HTTPException(status_code=404, detail="User not found")
+        
+    users_db[username]["is_locked"] = False
+    
+    log_user_activity(current_user["username"], "unlock_user", {"target_user": username})
+                     
+    return {"message": f"User {username} has been unlocked", "status": "success"}
+
+@app.post("/admin/users/{username}/promote")
+async def admin_promote_user(username: str, current_user: dict = Depends(require_admin)):
+    """Promote user to admin (Admin only)"""
+    if username not in users_db:
+        raise HTTPException(status_code=404, detail="User not found")
+        
+    users_db[username]["role"] = "admin"
+    
+    log_user_activity(current_user["username"], "promote_user", {"target_user": username})
+                     
+    return {"message": f"User {username} has been promoted to admin", "status": "success"}
+
+@app.delete("/admin/users/{username}")
+async def admin_delete_user(username: str, current_user: dict = Depends(require_admin)):
+    """Delete user account (Admin only)"""
+    if username not in users_db:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    if username == "admin":
+        raise HTTPException(status_code=400, detail="Cannot delete main admin account")
+    
+    if username == current_user["username"]:
+        raise HTTPException(status_code=400, detail="Cannot delete your own account")
+        
+    del users_db[username]
+    
+    log_user_activity(current_user["username"], "delete_user", {"target_user": username})
+                     
+    return {"message": f"User {username} has been deleted", "status": "success"}
+
+@app.get("/admin/activities")
+async def admin_list_activities(current_user: dict = Depends(require_admin)):
+    """List all activities (Admin only)"""
+    return sorted(activity_logs, key=lambda x: x["timestamp"], reverse=True)
+
+@app.get("/admin/dashboard/stats")
+async def admin_dashboard_stats(current_user: dict = Depends(require_admin)):
+    """Get dashboard statistics (Admin only)"""
+    total_users = len(users_db)
+    locked_users = sum(1 for u in users_db.values() if u.get("is_locked", False))
+    active_users = total_users - locked_users
+    total_activities = len(activity_logs)
+    
+    # Calculate recent activities (last 24h)
+    now = datetime.now()
+    recent_activities = sum(1 for a in activity_logs 
+                          if datetime.fromisoformat(a["timestamp"]) > now - timedelta(hours=24))
+    
+    return {
+        "totalUsers": total_users,
+        "activeUsers": active_users,
+        "lockedUsers": locked_users,
+        "totalActivities": total_activities,
+        "recentActivities": recent_activities
+    }
+```
+
+---
+
+## 2. FRONTEND CHANGES (React)
+
+### A. New Components
+Copy the exact files I created previously for:
+1.  `app/components/admin/AdminDashboard.jsx`
+2.  `app/components/admin/UserManagement.jsx`
+3.  `app/components/admin/ActivityLogs.jsx`
+
+### B. Update `Sidebar.jsx`
+Update the `serviceCategories` array and `Sidebar` component:
+
+```javascript
+/* -------------------- MENU CONFIG -------------------- */
+// Add this to your serviceCategories array
+{
+    id: 'admin',
+    name: 'Admin Panel',
+    icon: <Shield size={18} />,
+    services: [
+        { id: 'admin_dashboard', name: 'Dashboard', icon: <Home size={16} /> },
+        { id: 'user_management', name: 'User Management', icon: <Users size={16} /> },
+        { id: 'activity_logs', name: 'Activity Logs', icon: <FileText size={16} /> }
+    ]
+}
+
+/* -------------------- COMPONENT -------------------- */
+// Add userRole prop
+export default function Sidebar({ sidebarOpen, activeService, setActiveService, userRole = "user" }) {
+    // ...
+    
+    // Filter categories logic
+    const filteredCategories = serviceCategories.filter(category => {
+        if (category.id === 'admin') {
+            return userRole === 'admin';
+        }
+        return true;
+    });
+
+    // Use filteredCategories in the render loop...
+```
+
+### B. Update `Dashboard.jsx`
+Update to handle routing and passing role:
+
+```javascript
+// Add imports
+import AdminDashboard from "./admin/AdminDashboard";
+import UserManagement from "./admin/UserManagement";
+import ActivityLogs from "./admin/ActivityLogs";
+
+export default function Dashboard({ user, onLogout }) {
+    // ...
+    
+    // Check role
+    const isAdmin = user?.role === "admin";
+    
+    // Add routing check
+    useEffect(() => {
+        if (!isAdmin && ["admin_dashboard", "user_management", "activity_logs"].includes(activeService)) {
+            setActiveService("home");
+        }
+    }, [activeService, isAdmin]);
+
+    // Update renderContent switch
+    const renderContent = () => {
+        switch (activeService) {
+            case "home":
+                return isAdmin ? <AdminDashboard /> : <HomeView user={user} />;
+            case "admin_dashboard":
+                return <AdminDashboard />;
+            case "user_management":
+                return <UserManagement />;
+            case "activity_logs":
+                return <ActivityLogs />;
+            // ... existing cases ...
+        }
+    }
+    
+    // Pass userRole to Sidebar
+    return (
+        // ...
+        <Sidebar
+            sidebarOpen={sidebarOpen}
+            activeService={activeService}
+            setActiveService={setActiveService}
+            userRole={user?.role || "user"}
+        />
+        // ...
+    )
+}
+```
