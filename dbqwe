@@ -1,0 +1,90 @@
+from typing import Optional, Annotated, Dict, Any
+from datetime import datetime
+
+from fastapi import Depends
+from sqlmodel import (
+    SQLModel,
+    Field,
+    Session,
+    create_engine,
+    Column,
+    JSON
+)
+
+# ======================================================
+# DATABASE CONFIG (CURRENT DB - UNCHANGED)
+# ======================================================
+
+sqlite_file_name = "db/database.db"
+sqlite_url = f"sqlite:///{sqlite_file_name}"
+
+connect_args = {"check_same_thread": False}
+engine = create_engine(
+    sqlite_url,
+    connect_args=connect_args,
+    echo=True
+)
+
+# ======================================================
+# EARLIER DB MODELS (NOW CONVERTED & PRESERVED)
+# ======================================================
+
+class User(SQLModel, table=True):
+    __tablename__ = "users"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    username: str = Field(index=True, unique=True)
+    hashed_password: str
+
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    department_code: Optional[int] = None
+
+    role: str = Field(default="user")          # admin / user
+    is_locked: bool = Field(default=False)
+
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    last_login: Optional[datetime] = None
+
+
+class ActivityLog(SQLModel, table=True):
+    __tablename__ = "activity_logs"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    username: str
+    action: str
+
+    details: Optional[Dict[str, Any]] = Field(
+        default=None,
+        sa_column=Column(JSON)
+    )
+
+    status: str
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
+
+# ======================================================
+# (PLACEHOLDER) YOUR CURRENT / FUTURE MODELS
+# Add any other tables BELOW this line
+# ======================================================
+#
+# class SomeOtherTable(SQLModel, table=True):
+#     ...
+
+
+# ======================================================
+# DB INITIALIZATION
+# ======================================================
+
+def create_db_and_tables():
+    SQLModel.metadata.create_all(engine)
+
+# ======================================================
+# SESSION DEPENDENCY (CURRENT DB - UNCHANGED)
+# ======================================================
+
+def get_session():
+    with Session(engine) as session:
+        yield session
+
+
+SessionDep = Annotated[Session, Depends(get_session)]
