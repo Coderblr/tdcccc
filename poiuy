@@ -1,0 +1,235 @@
+from fastapi import FastAPI, Depends, HTTPException
+from sqlalchemy import create_engine, Column, Integer, String, Boolean, DateTime, JSON
+from sqlalchemy.orm import sessionmaker, declarative_base, Session
+from datetime import datetime
+from passlib.context import CryptContext
+from pydantic import BaseModel
+
+# =====================================================
+# DATABASE (SQLite – Built-in Python DB)
+# =====================================================
+
+DATABASE_URL = "sqlite:///./sbi_testdata.db"
+
+engine = create_engine(
+    DATABASE_URL,
+    connect_args={"check_same_thread": False}
+)
+
+SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+Base = declarative_base()
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+# =====================================================
+# MODELS
+# =====================================================
+
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True)
+    username = Column(String, unique=True, index=True)
+    hashed_password = Column(String)
+    first_name = Column(String)
+    last_name = Column(String)
+    department_code = Column(Integer)
+    role = Column(String, default="user")   # admin / user
+    is_locked = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    last_login = Column(DateTime, nullable=True)
+
+
+class ActivityLog(Base):
+    __tablename__ = "activity_logs"
+
+    id = Column(Integer, primary_key=True)
+    username = Column(String)
+    action = Column(String)
+    details = Column(JSON)
+    status = Column(String)
+    timestamp = Column(DateTime, default=datetime.utcnow)
+
+# =====================================================
+# SCHEMAS
+# =====================================================
+
+class RegisterRequest(BaseModel):
+    username: str
+    password: str
+    first_name: str
+    last_name: str
+    department_code: int
+
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+class CIFRequest(BaseModel):
+    cif_type: str
+    count: int
+
+# =====================================================
+# SECURITY
+# =====================================================
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+def hash_password(password: str):
+    return pwd_context.hash(password)
+
+def verify_password(password: str, hashed: str):
+    return pwd_context.verify(password, hashed)
+
+# =====================================================
+# AUTH HELPERS (Simple – No JWT)
+# =====================================================
+
+def get_current_user(db: Session = Depends(get_db)):
+    # TEMP: assume admin is logged in
+    user = db.query(User).filter(User.username == "admin").first()
+    if not user or user.is_locked:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    return user
+
+def require_admin(current_user: User = Depends(get_current_user)):
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return current_user
+
+# =====================================================
+# LOGGING
+# =====================================================
+
+def log_activity(db, username, action, details, status="success"):
+    log = ActivityLog(
+        username=username,
+        action=action,
+        details=details,
+        status=status
+    )
+    db.add(log)
+    db.commit()
+
+# =====================================================
+# APP INIT
+# =====================================================
+
+app = FastAPI(title="SBI Test Data Platform (SQLite)")
+
+Base.metadata.create_all(bind=engine)
+
+# =====================================================
+# AUTH APIs
+# =====================================================
+
+@app.post("/register")
+def register_user(data: RegisterRequest, db: Session = Depends(get_db)):
+    if db.query(User).filter(User.username == data.username).first():
+        raise HTTPException(status_code=400, detail="User already exists")
+
+    user = User(
+        username=data.username,
+        hashed_password=hash_password(data.password),
+        first_name=data.first_name,
+        last_name=data.last_name,
+        department_code=data.department_code,
+        role="user"
+    )
+
+    db.add(user)
+    db.commit()
+
+    log_activity(db, data.username, "register", {"role": "user"})
+    return {"message": "User registered successfully"}
+
+
+@app.post("/login")
+def login_user(data: LoginRequest, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.username == data.username).first()
+
+    if not user or not verify_password(data.password, user.hashed_password):
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    if user.is_locked:
+        raise HTTPException(status_code=403, detail="Account locked")
+
+    user.last_login = datetime.utcnow()
+    db.commit()
+
+    log_activity(db, user.username, "login", {})
+    return {"message": "Login successful", "role": user.role}
+
+# =====================================================
+# BUSINESS API
+# =====================================================
+
+@app.post("/create_cif")
+def create_cif(
+    request: CIFRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    result = {
+        "cif_type": request.cif_type,
+        "count": request.count,
+        "generated": True
+    }
+
+    log_activity(db, current_user.username, "create_cif", result)
+    return result
+
+# =====================================================
+# ADMIN APIs
+# =====================================================
+
+@app.get("/admin/users")
+def list_users(
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin)
+):
+    return db.query(User).all()
+
+
+@app.post("/admin/users/{username}/lock")
+def lock_user(
+    username: str,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin)
+):
+    user = db.query(User).filter(User.username == username).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    user.is_locked = True
+    db.commit()
+
+    log_activity(db, admin.username, "lock_user", {"target": username})
+    return {"message": "User locked successfully"}
+
+# =====================================================
+# AUTO CREATE ADMIN (FIRST RUN)
+# =====================================================
+
+@app.on_event("startup")
+def create_admin():
+    db = SessionLocal()
+    if not db.query(User).filter(User.username == "admin").first():
+        admin = User(
+            username="admin",
+            hashed_password=hash_password("admin123"),
+            first_name="System",
+            last_name="Admin",
+            department_code=0,
+            role="admin"
+        )
+        db.add(admin)
+        db.commit()
+    db.close()
