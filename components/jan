@@ -1,0 +1,37 @@
+'use client';
+
+import { useState } from 'react';
+
+export default function UserManagement() {
+  const [users, setUsers] = useState([
+    { id: 1, name: 'Rahul', locked: false },
+    { id: 2, name: 'Ankit', locked: true },
+    { id: 3, name: 'Neha', locked: false },
+  ]);
+
+  const toggleLock = (id) => {
+    setUsers(users.map(u =>
+      u.id === id ? { ...u, locked: !u.locked } : u
+    ));
+  };
+
+  return (
+    <div>
+      <h1>User Management</h1>
+
+      {users.map(user => (
+        <div key={user.id} style={{ marginBottom: 10 }}>
+          {user.name} —
+          {user.locked ? ' 🔒 Locked' : ' ✅ Active'}
+
+          <button
+            style={{ marginLeft: 10 }}
+            onClick={() => toggleLock(user.id)}
+          >
+            {user.locked ? 'Unlock' : 'Lock'}
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}
