@@ -1,0 +1,224 @@
+import { useState } from "react";
+import { styles } from "../../styles/AppStyles";
+
+export default function ModView() {
+  const [cif, setCif] = useState("");
+  const [region, setRegion] = useState("");
+  const [response, setResponse] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [showOutput, setShowOutput] = useState(false);
+  const [formErrors, setFormErrors] = useState({});
+
+  const BASE_URL = process.env.NEXT_PUBLIC_API_URL;
+
+  const handleSubmit = async () => {
+    const errors = {};
+
+    // CIF validation (exactly 11 digits)
+    if (!/^\d{11}$/.test(cif)) {
+      errors.cif = "Please enter correct CIF (11 digits)";
+    }
+
+    if (!region) {
+      errors.region = "Please select a Region";
+    }
+
+    if (Object.keys(errors).length > 0) {
+      setFormErrors(errors);
+      return;
+    }
+
+    setLoading(true);
+    setError("");
+    setResponse(null);
+    setShowOutput(false);
+
+    const userToken = localStorage.getItem("userToken");
+    const url = `${BASE_URL}/mod_acc`;
+
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${userToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          region: region,
+          user_input: cif,
+        }),
+      });
+
+      if (!res.ok) {
+        throw new Error(`API Error: ${res.status} ${res.statusText}`);
+      }
+
+      const data = await res.json();
+
+      // 🚨 STRICT ERROR CHECK
+      if (data.error || data.detail) {
+        setError(data.error || data.detail);
+        setShowOutput(true);
+        return;
+      }
+
+      // ✅ VALID SUCCESS CHECK
+      if (
+        data.status === "success" &&
+        data.response &&
+        typeof data.response === "string" &&
+        /^\d+$/.test(data.response)
+      ) {
+        setResponse(data);
+      } else {
+        setError("Account creation failed.");
+      }
+
+      setShowOutput(true);
+    } catch (err) {
+      setError(err.message);
+      setShowOutput(true);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleManualReset = () => {
+    setCif("");
+    setRegion("");
+    setResponse(null);
+    setError("");
+    setShowOutput(false);
+    setFormErrors({});
+  };
+
+  return (
+    <div>
+      {/* Header */}
+      <div style={styles.pageHeader}>
+        <div>
+          <h1 style={styles.pageTitle}>Create MOD Account</h1>
+          <p style={styles.pageSubtitle}>
+            Generate MOD accounts for testing
+          </p>
+        </div>
+      </div>
+
+      {/* Form Card */}
+      <div style={styles.formCard}>
+        <div style={styles.formGrid}>
+          {/* Region */}
+          <div style={styles.formGroup}>
+            <label style={styles.label}>Region</label>
+            <select
+              value={region}
+              onChange={(e) => {
+                setRegion(e.target.value);
+                setFormErrors({ ...formErrors, region: "" });
+              }}
+              style={styles.select}
+            >
+              <option value="">Select Region</option>
+              <option value="O">O - UAT</option>
+              <option value="X">X - UAT</option>
+              <option value="Y">Y - UAT</option>
+              <option value="Z">Z - UAT</option>
+              <option value="K">K - Pre-Prod</option>
+              <option value="J">J - Pre-Prod</option>
+              <option value="R1">R1 - Pre-Prod</option>
+              <option value="Y2">Y2 - Pre-Prod</option>
+              <option value="L">L - Pre-Prod</option>
+              <option value="C">C - Pre-Prod</option>
+            </select>
+            {formErrors.region && (
+              <div style={styles.fieldError}>{formErrors.region}</div>
+            )}
+          </div>
+
+          {/* CIF */}
+          <div style={styles.formGroup}>
+            <label style={styles.label}>CIF / Input Number</label>
+            <input
+              type="text"
+              value={cif}
+              onChange={(e) => {
+                const value = e.target.value;
+
+                if (!/^\d*$/.test(value) || value.length > 11) return;
+
+                setCif(value);
+                setFormErrors({ ...formErrors, cif: "" });
+              }}
+              style={styles.input}
+              required
+            />
+            {formErrors.cif && (
+              <div style={styles.fieldError}>{formErrors.cif}</div>
+            )}
+          </div>
+        </div>
+
+        {/* Buttons */}
+        <div style={{ display: "flex", gap: "10px" }}>
+          <button
+            onClick={handleSubmit}
+            style={styles.primaryButton}
+            disabled={loading}
+          >
+            {loading ? "Submitting..." : "Submit"}
+          </button>
+
+          <button
+            onClick={handleManualReset}
+            style={styles.secondaryButton}
+          >
+            Reset Form
+          </button>
+        </div>
+      </div>
+
+      {/* Results Section */}
+      {showOutput && (
+        <div style={styles.resultsCard}>
+          {/* ERROR DISPLAY */}
+          {error && (
+            <div style={styles.errorMsg}>
+              <strong>Error:</strong>{" "}
+              {typeof error === "object"
+                ? JSON.stringify(error)
+                : error}
+            </div>
+          )}
+
+          {/* SUCCESS DISPLAY */}
+          {response && !error && (
+            <div style={styles.resultsList}>
+              <div style={styles.resultItem}>
+                <div style={styles.resultContent}>
+                  <p
+                    style={{
+                      fontSize: "16px",
+                      fontWeight: "600",
+                      color: "#059669",
+                      marginBottom: "8px",
+                    }}
+                  >
+                    Success
+                  </p>
+                  <p>
+                    <strong>MOD Account Number:</strong>{" "}
+                    {response.response}
+                  </p>
+                  <p>
+                    <strong>Region:</strong> {response.region}
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
