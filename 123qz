@@ -1,0 +1,170 @@
+"use client";
+
+import { useState } from "react";
+import { styles } from "../../styles/AppStyles";
+
+export default function AccountEnquiry() {
+  const [cif, setCif] = useState("");
+  const [server, setServer] = useState("O");
+  const [response, setResponse] = useState(null);
+  const [error, setError] = useState("");
+
+  const BASE_URL = process.env.NEXT_PUBLIC_API_URL;
+
+  const handleSubmit = async (event) => {
+    event.preventDefault();
+    setError("");
+    setResponse(null);
+
+    // ✅ Strict 11-digit validation
+    const accountRegex = /^\d{11}$/;
+    if (!accountRegex.test(cif)) {
+      setError("Account Number must be exactly 11 digits");
+      return;
+    }
+
+    const userToken = localStorage.getItem("userToken");
+    const url = `${BASE_URL}/account_enquiry`;
+
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${userToken}`,
+        },
+        body: JSON.stringify({
+          cif: cif,
+          server: server,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data?.detail || "Something went wrong");
+      }
+
+      setResponse(data);
+    } catch (err) {
+      console.error("Error:", err);
+      setError(err.message);
+    }
+  };
+
+  return (
+    <div>
+      {/* Page Header */}
+      <div style={styles.pageHeader}>
+        <div>
+          <h1 style={styles.pageTitle}>Account Enquiry</h1>
+          <p style={styles.pageSubtitle}>
+            Fetch account details from selected environment
+          </p>
+        </div>
+      </div>
+
+      {/* Form Card */}
+      <div style={styles.formCard}>
+        <div style={styles.formGrid}>
+
+          {/* Account Number */}
+          <div style={styles.formGroup}>
+            <label style={styles.label}>Account Number</label>
+            <input
+              type="text"
+              value={cif}
+              onChange={(e) => {
+                const digits = e.target.value.replace(/\D/g, "");
+                if (digits.length <= 11) {
+                  setCif(digits);
+                }
+              }}
+              style={styles.input}
+              placeholder="Enter 11-digit Account Number"
+            />
+          </div>
+
+          {/* Server */}
+          <div style={styles.formGroup}>
+            <label style={styles.label}>Server</label>
+            <select
+              value={server}
+              onChange={(e) => setServer(e.target.value)}
+              style={styles.select}
+            >
+              <option value="O">O - UAT</option>
+              <option value="X">X - UAT</option>
+              <option value="Y">Y - UAT</option>
+              <option value="Z">Z - UAT</option>
+              <option value="K">K - Pre-Prod</option>
+              <option value="J">J - Pre-Prod</option>
+              <option value="R1">R1 - Pre-Prod</option>
+              <option value="Y2">Y2 - Pre-Prod</option>
+              <option value="L">L - Pre-Prod</option>
+            </select>
+          </div>
+
+        </div>
+
+        {error && (
+          <div style={styles.errorMsg}>
+            {error}
+          </div>
+        )}
+
+        <button
+          onClick={handleSubmit}
+          style={styles.primaryButton}
+        >
+          Fetch Account Details
+        </button>
+      </div>
+
+      {/* Results Section */}
+      {response && (
+        <div style={styles.resultsCard}>
+          <div style={styles.resultsHeader}>
+            <h3 style={styles.resultsTitle}>Account Enquiry Result</h3>
+          </div>
+
+          <div style={styles.resultsList}>
+            <div style={styles.resultItem}>
+              <div style={styles.resultNumber}>1</div>
+              <div style={styles.resultContent}>
+
+                <div>
+                  <span style={styles.resultLabel}>Server:</span>
+                  <span style={styles.resultValue}>{response.server}</span>
+                </div>
+
+                <div>
+                  <span style={styles.resultLabel}>Account Number:</span>
+                  <span style={styles.resultValue}>{response.extracted_account}</span>
+                </div>
+
+                <div>
+                  <span style={styles.resultLabel}>Customer Name:</span>
+                  <span style={styles.resultValue}>{response.customer_name}</span>
+                </div>
+
+                <div>
+                  <span style={styles.resultLabel}>Available Balance:</span>
+                  <span style={styles.resultValue}>
+                    {response.total_balance_cleared_Balance}
+                  </span>
+                </div>
+
+                <div>
+                  <span style={styles.resultLabel}>Currency:</span>
+                  <span style={styles.resultValue}>{response.currency}</span>
+                </div>
+
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
