@@ -68,22 +68,37 @@ export default function LoginPage({ onLoginSuccess, onNavigate }) {
         },
       });
 
+      // Step 3: Safely parse the response
+      let userData;
+      try {
+        userData = await fetchUser.json();
+      } catch {
+        userData = {};
+      }
+
       if (!fetchUser.ok) {
         throw new Error("Failed to fetch user info");
       }
 
-      const userData = await fetchUser.json();
+      // Step 4: Guard against undefined/null userData
+      if (!userData || typeof userData !== "object") {
+        throw new Error("Invalid user data received from server");
+      }
 
-      // Step 3: Extract userType — 1 = admin, anything else = regular user
-      // Handle both camelCase and snake_case from backend
+      // Step 5: Extract userType safely
+      // Backend: userType 1 = admin, anything else = regular user
+      // Handle both camelCase (userType) and snake_case (user_type) from backend
       const userType = Number(
-        userData?.userType ?? userData?.user_type ?? 0
+        userData.userType ?? userData.user_type ?? 0
       );
 
-      // Step 4: Notify parent (page.js) with resolved userType
+      console.log("Logged in userData:", userData);
+      console.log("Resolved userType:", userType);
+
+      // Step 6: Notify parent (page.js) with resolved userType
       onLoginSuccess(userType);
 
-      // Step 5: Navigate based on role
+      // Step 7: Navigate based on role
       if (userType === 1) {
         onNavigate("admin");
       } else {
@@ -103,7 +118,6 @@ export default function LoginPage({ onLoginSuccess, onNavigate }) {
   // ---- YOUR ORIGINAL JSX BELOW (unchanged) ----
   return (
     // Keep your existing return/JSX here exactly as it was
-    // Only the handleLogin function above has been changed
     <></>
   );
 }
