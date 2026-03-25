@@ -1,86 +1,179 @@
-"use client";
+'use client';
 
-import { useState } from "react";
-import { validation } from "../utils/validation";
+import { useEffect, useState } from "react";
+import { styles } from "../../styles/AppStyles";
 
-export default function LoginPage({ onLoginSuccess, onNavigate }) {
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
-  const [loading, setLoading] = useState(false);
+export default function AdminDashboard({ user, onLogout }) {
+  const [response, setResponse] = useState(null);
+  const [users, setUsers] = useState([]);
+  const [search, setSearch] = useState("");
   const [error, setError] = useState("");
-  const [showPassword, setShowPassword] = useState(false);
-
-  const [usernameError, setUsernameError] = useState("");
-  const [passwordError, setPasswordError] = useState("");
-
-  const [userFocused, setUserFocused] = useState(false);
-  const [passFocused, setPassFocused] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
 
   const BASE_URL = process.env.NEXT_PUBLIC_API_URL;
+  const usersPerPage = 10;
 
-  const handleLogin = async (e) => {
-    e.preventDefault();
+  useEffect(() => {
+    fetchAdminDashboard();
+    fetchAllUsers();
+  }, []);
+
+  async function fetchAdminDashboard() {
     setLoading(true);
-    setError("");
-
-    const usernameErr = validation.username(username);
-    const passwordErr = validation.password(password);
-
-    setUsernameError(usernameErr);
-    setPasswordError(passwordErr);
-
-    if (usernameErr || passwordErr) {
-      setLoading(false);
-      return;
-    }
-
     try {
-      // Step 1: POST /token — backend sets cookie automatically
-      const response = await fetch(`${BASE_URL}/token`, {
-        method: "POST",
-        credentials: "include",
+      const res = await fetch(`${BASE_URL}/admin/dashboard`, {
+        method: "GET",
+        credentials: "include", // cookie-based auth
         headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
+          Accept: "application/json",
         },
-        body: new URLSearchParams({
-          username,
-          password,
-        }),
       });
 
-      let data;
-      try {
-        data = await response.json();
-      } catch {
-        data = {};
-      }
-
-      if (!response.ok) {
-        throw new Error(data.detail || "Login failed");
-      }
-
-      /*
-        ✅ IMPORTANT:
-        Do NOT fetch /users/me here.
-        Do NOT call onNavigate here.
-        Just call onLoginSuccess() — page.js will fetch /users/me,
-        set the user state, and route automatically based on userType.
-      */
-      onLoginSuccess();
-
-      setUsername("");
-      setPassword("");
-
+      if (!res.ok) throw new Error("Failed to load dashboard");
+      const data = await res.json();
+      setResponse(data);
     } catch (err) {
-      setError(err.message || "Invalid username or password");
+      setError(err.message || "Failed to load dashboard");
     } finally {
       setLoading(false);
     }
-  };
+  }
 
-  // ---- YOUR ORIGINAL JSX BELOW (unchanged) ----
+  async function fetchAllUsers() {
+    try {
+      const res = await fetch(`${BASE_URL}/admin/users`, {
+        method: "GET",
+        credentials: "include", // cookie-based auth
+        headers: {
+          Accept: "application/json",
+        },
+      });
+
+      if (!res.ok) throw new Error("Failed to load users");
+      const data = await res.json();
+      setUsers(data);
+    } catch (err) {
+      setError(err.message || "Failed to load users");
+    }
+  }
+
+  const filteredUsers = users.filter((u) =>
+    `${u.username} ${u.firstName} ${u.lastName}`
+      .toLowerCase()
+      .includes(search.toLowerCase())
+  );
+
+  // Pagination logic
+  const totalPages = Math.ceil(filteredUsers.length / usersPerPage);
+  const indexOfLastUser = currentPage * usersPerPage;
+  const indexOfFirstUser = indexOfLastUser - usersPerPage;
+  const currentUsers = filteredUsers.slice(indexOfFirstUser, indexOfLastUser);
+
   return (
-    // Keep your existing return/JSX here exactly as it was
-    <></>
+    <div style={styles.page}>
+      {/* HEADER */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <h1 style={styles.heading}>Admin Dashboard</h1>
+        {onLogout && (
+          <button onClick={onLogout} style={styles.menuBtn}>
+            Logout
+          </button>
+        )}
+      </div>
+
+      {loading && <div>Loading...</div>}
+      {error && <div style={{ color: "red" }}>{error}</div>}
+
+      {/* DASHBOARD INFO */}
+      {response && (
+        <div style={styles.card}>
+          <h2 style={styles.cardTitle}>{response.message}</h2>
+          <p style={styles.mutedText}>
+            Logged in as {response.username}
+          </p>
+        </div>
+      )}
+
+      {/* USERS SECTION */}
+      <div style={styles.card}>
+        <div style={styles.tableHeader}>
+          <h2 style={styles.cardTitle}>User Management</h2>
+          <input
+            type="text"
+            placeholder="Search users..."
+            value={search}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setCurrentPage(1);
+            }}
+            style={styles.searchInput}
+          />
+        </div>
+
+        <table style={styles.table}>
+          <thead>
+            <tr>
+              <th style={styles.tableHeaderCell}>#</th>
+              <th style={styles.tableHeaderCell}>Username</th>
+              <th style={styles.tableHeaderCell}>Full Name</th>
+              <th style={styles.tableHeaderCell}>Department</th>
+              <th style={styles.tableHeaderCell}>Role</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            {currentUsers.map((u, index) => (
+              <tr key={u.username} style={styles.tableRow}>
+                <td style={styles.tableCell}>
+                  {indexOfFirstUser + index + 1}
+                </td>
+                <td style={{ ...styles.tableCell, ...styles.usernameCell }}>
+                  {u.username}
+                </td>
+                <td style={styles.tableCell}>
+                  {u.firstName} {u.lastName}
+                </td>
+                <td style={styles.tableCell}>
+                  {u.departmentCode}
+                </td>
+                <td style={styles.tableCell}>
+                  <span style={styles.badge(u.role)}>
+                    {u.role}
+                  </span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+
+        {filteredUsers.length === 0 && !loading && (
+          <div>No users found</div>
+        )}
+
+        {/* Pagination */}
+        {filteredUsers.length > 0 && (
+          <div style={styles.paginationContainer}>
+            <button
+              onClick={() => setCurrentPage(currentPage - 1)}
+              disabled={currentPage === 1}
+              style={styles.paginationButton}
+            >
+              Previous
+            </button>
+            <span style={styles.paginationInfo}>
+              Page {currentPage} of {totalPages}
+            </span>
+            <button
+              onClick={() => setCurrentPage(currentPage + 1)}
+              disabled={currentPage === totalPages}
+              style={styles.paginationButton}
+            >
+              Next
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
