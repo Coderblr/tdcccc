@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import WelcomePage from "./components/WelcomePage";
 import LoginPage from "./components/auth/LoginPage";
 import RegisterPage from "./components/auth/RegisterPage";
@@ -11,7 +11,7 @@ import AdminDashboard from "./components/admin/AdminDashboard";
 export default function SBIApp() {
   const [currentPage, setCurrentPage] = useState("welcome");
   const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true); // true on first load to check session
   const [error, setError] = useState("");
   const [user, setUser] = useState(null);
 
@@ -24,11 +24,9 @@ export default function SBIApp() {
   */
   const fetchUserProfile = async () => {
     try {
-      setLoading(true);
-
       const response = await fetch(`${BASE_URL}/users/me`, {
         method: "GET",
-        credentials: "include",
+        credentials: "include", // sends existing cookie automatically
         headers: {
           Accept: "application/json",
         },
@@ -41,17 +39,17 @@ export default function SBIApp() {
         userData = {};
       }
 
+      // 401 means no valid cookie — user is not logged in, that's fine
       if (!response.ok) {
-        throw new Error("Failed to fetch user data");
+        return false; // session not found
       }
 
       if (!userData || typeof userData !== "object") {
-        throw new Error("Invalid user data received");
+        return false;
       }
 
       console.log("fetchUserProfile userData:", userData);
 
-      // Handle both camelCase and snake_case from backend
       const resolvedUserType = Number(
         userData.userType ?? userData.user_type ?? 0
       );
@@ -64,22 +62,41 @@ export default function SBIApp() {
       });
 
       setIsLoggedIn(true);
+      return true; // session found
 
     } catch (err) {
       console.error("fetchUserProfile error:", err);
-      setError(err.message);
-    } finally {
-      setLoading(false);
+      return false;
     }
   };
 
   /*
   ============================
+  ON APP LOAD — CHECK EXISTING SESSION
+  If cookie already exists in browser, fetch profile silently.
+  This prevents re-login after page refresh.
+  ============================
+  */
+  useEffect(() => {
+    const checkSession = async () => {
+      setLoading(true);
+      await fetchUserProfile();
+      setLoading(false);
+    };
+
+    checkSession();
+  }, []); // runs once on mount
+
+  /*
+  ============================
   LOGIN SUCCESS
+  Called by LoginPage after /token succeeds and cookie is freshly set
   ============================
   */
   const handleLoginSuccess = async () => {
+    setLoading(true);
     await fetchUserProfile();
+    setLoading(false);
   };
 
   /*
@@ -145,10 +162,8 @@ export default function SBIApp() {
     console.log("Routing — user.userType:", user.userType);
 
     if (user.userType === 1) {
-      // Admin gets AdminDashboard with user + onLogout
       return <AdminDashboard user={user} onLogout={handleLogout} />;
     }
-    // Regular user gets Dashboard
     return <Dashboard user={user} onLogout={handleLogout} />;
   }
 
