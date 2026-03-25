@@ -1,179 +1,162 @@
-'use client';
+"use client";
 
-import { useEffect, useState } from "react";
-import { styles } from "../../styles/AppStyles";
+import { useState } from "react";
+import WelcomePage from "./components/WelcomePage";
+import LoginPage from "./components/auth/LoginPage";
+import RegisterPage from "./components/auth/RegisterPage";
+import Dashboard from "./components/dashboard/Dashboard";
+import { styles } from "./styles/AppStyles";
+import AdminDashboard from "./components/admin/AdminDashboard";
 
-export default function AdminDashboard({ user, onLogout }) {
-  const [response, setResponse] = useState(null);
-  const [users, setUsers] = useState([]);
-  const [search, setSearch] = useState("");
-  const [error, setError] = useState("");
+export default function SBIApp() {
+  const [currentPage, setCurrentPage] = useState("welcome");
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [currentPage, setCurrentPage] = useState(1);
+  const [error, setError] = useState("");
+  const [user, setUser] = useState(null);
 
   const BASE_URL = process.env.NEXT_PUBLIC_API_URL;
-  const usersPerPage = 10;
 
-  useEffect(() => {
-    fetchAdminDashboard();
-    fetchAllUsers();
-  }, []);
-
-  async function fetchAdminDashboard() {
-    setLoading(true);
+  /*
+  ============================
+  FETCH USER PROFILE (COOKIE BASED)
+  ============================
+  */
+  const fetchUserProfile = async () => {
     try {
-      const res = await fetch(`${BASE_URL}/admin/dashboard`, {
+      setLoading(true);
+
+      const response = await fetch(`${BASE_URL}/users/me`, {
         method: "GET",
-        credentials: "include", // cookie-based auth
+        credentials: "include",
         headers: {
           Accept: "application/json",
         },
       });
 
-      if (!res.ok) throw new Error("Failed to load dashboard");
-      const data = await res.json();
-      setResponse(data);
+      let userData;
+      try {
+        userData = await response.json();
+      } catch {
+        userData = {};
+      }
+
+      if (!response.ok) {
+        throw new Error("Failed to fetch user data");
+      }
+
+      if (!userData || typeof userData !== "object") {
+        throw new Error("Invalid user data received");
+      }
+
+      console.log("fetchUserProfile userData:", userData);
+
+      // Handle both camelCase and snake_case from backend
+      const resolvedUserType = Number(
+        userData.userType ?? userData.user_type ?? 0
+      );
+
+      console.log("Resolved userType:", resolvedUserType);
+
+      setUser({
+        ...userData,
+        userType: resolvedUserType,
+      });
+
+      setIsLoggedIn(true);
+
     } catch (err) {
-      setError(err.message || "Failed to load dashboard");
+      console.error("fetchUserProfile error:", err);
+      setError(err.message);
     } finally {
       setLoading(false);
     }
+  };
+
+  /*
+  ============================
+  LOGIN SUCCESS
+  ============================
+  */
+  const handleLoginSuccess = async () => {
+    await fetchUserProfile();
+  };
+
+  /*
+  ============================
+  LOGOUT
+  ============================
+  */
+  const handleLogout = async () => {
+    try {
+      await fetch(`${BASE_URL}/logout`, {
+        method: "POST",
+        credentials: "include",
+      });
+    } catch (err) {
+      console.error("Logout error:", err);
+    }
+
+    setUser(null);
+    setIsLoggedIn(false);
+    setCurrentPage("welcome");
+  };
+
+  /*
+  ============================
+  LOADING SCREEN
+  ============================
+  */
+  if (loading) {
+    return (
+      <div style={styles.loadingContainer}>
+        <div style={styles.spinner}></div>
+        <p style={styles.loadingText}>Loading...</p>
+      </div>
+    );
   }
 
-  async function fetchAllUsers() {
-    try {
-      const res = await fetch(`${BASE_URL}/admin/users`, {
-        method: "GET",
-        credentials: "include", // cookie-based auth
-        headers: {
-          Accept: "application/json",
-        },
-      });
+  /*
+  ============================
+  ROUTING
+  ============================
+  */
 
-      if (!res.ok) throw new Error("Failed to load users");
-      const data = await res.json();
-      setUsers(data);
-    } catch (err) {
-      setError(err.message || "Failed to load users");
+  // Not logged in — show welcome / login / register
+  if (!isLoggedIn) {
+    if (currentPage === "welcome") {
+      return <WelcomePage onNavigate={setCurrentPage} />;
+    }
+    if (currentPage === "login") {
+      return (
+        <LoginPage
+          onLoginSuccess={handleLoginSuccess}
+          onNavigate={setCurrentPage}
+        />
+      );
+    }
+    if (currentPage === "register") {
+      return <RegisterPage onNavigate={setCurrentPage} />;
     }
   }
 
-  const filteredUsers = users.filter((u) =>
-    `${u.username} ${u.firstName} ${u.lastName}`
-      .toLowerCase()
-      .includes(search.toLowerCase())
-  );
+  // Logged in — route PURELY by userType
+  if (isLoggedIn && user) {
+    console.log("Routing — user.userType:", user.userType);
 
-  // Pagination logic
-  const totalPages = Math.ceil(filteredUsers.length / usersPerPage);
-  const indexOfLastUser = currentPage * usersPerPage;
-  const indexOfFirstUser = indexOfLastUser - usersPerPage;
-  const currentUsers = filteredUsers.slice(indexOfFirstUser, indexOfLastUser);
+    if (user.userType === 1) {
+      // Admin gets AdminDashboard with user + onLogout
+      return <AdminDashboard user={user} onLogout={handleLogout} />;
+    }
+    // Regular user gets Dashboard
+    return <Dashboard user={user} onLogout={handleLogout} />;
+  }
 
+  // Fallback
   return (
-    <div style={styles.page}>
-      {/* HEADER */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <h1 style={styles.heading}>Admin Dashboard</h1>
-        {onLogout && (
-          <button onClick={onLogout} style={styles.menuBtn}>
-            Logout
-          </button>
-        )}
-      </div>
-
-      {loading && <div>Loading...</div>}
-      {error && <div style={{ color: "red" }}>{error}</div>}
-
-      {/* DASHBOARD INFO */}
-      {response && (
-        <div style={styles.card}>
-          <h2 style={styles.cardTitle}>{response.message}</h2>
-          <p style={styles.mutedText}>
-            Logged in as {response.username}
-          </p>
-        </div>
-      )}
-
-      {/* USERS SECTION */}
-      <div style={styles.card}>
-        <div style={styles.tableHeader}>
-          <h2 style={styles.cardTitle}>User Management</h2>
-          <input
-            type="text"
-            placeholder="Search users..."
-            value={search}
-            onChange={(e) => {
-              setSearch(e.target.value);
-              setCurrentPage(1);
-            }}
-            style={styles.searchInput}
-          />
-        </div>
-
-        <table style={styles.table}>
-          <thead>
-            <tr>
-              <th style={styles.tableHeaderCell}>#</th>
-              <th style={styles.tableHeaderCell}>Username</th>
-              <th style={styles.tableHeaderCell}>Full Name</th>
-              <th style={styles.tableHeaderCell}>Department</th>
-              <th style={styles.tableHeaderCell}>Role</th>
-            </tr>
-          </thead>
-
-          <tbody>
-            {currentUsers.map((u, index) => (
-              <tr key={u.username} style={styles.tableRow}>
-                <td style={styles.tableCell}>
-                  {indexOfFirstUser + index + 1}
-                </td>
-                <td style={{ ...styles.tableCell, ...styles.usernameCell }}>
-                  {u.username}
-                </td>
-                <td style={styles.tableCell}>
-                  {u.firstName} {u.lastName}
-                </td>
-                <td style={styles.tableCell}>
-                  {u.departmentCode}
-                </td>
-                <td style={styles.tableCell}>
-                  <span style={styles.badge(u.role)}>
-                    {u.role}
-                  </span>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-
-        {filteredUsers.length === 0 && !loading && (
-          <div>No users found</div>
-        )}
-
-        {/* Pagination */}
-        {filteredUsers.length > 0 && (
-          <div style={styles.paginationContainer}>
-            <button
-              onClick={() => setCurrentPage(currentPage - 1)}
-              disabled={currentPage === 1}
-              style={styles.paginationButton}
-            >
-              Previous
-            </button>
-            <span style={styles.paginationInfo}>
-              Page {currentPage} of {totalPages}
-            </span>
-            <button
-              onClick={() => setCurrentPage(currentPage + 1)}
-              disabled={currentPage === totalPages}
-              style={styles.paginationButton}
-            >
-              Next
-            </button>
-          </div>
-        )}
-      </div>
+    <div style={styles.loadingContainer}>
+      <div style={styles.spinner}></div>
+      <p style={styles.loadingText}>Loading...</p>
     </div>
   );
 }
