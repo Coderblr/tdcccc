@@ -1,123 +1,170 @@
 "use client";
 
 import { useState } from "react";
-import { validation } from "../utils/validation";
+import WelcomePage from "./components/WelcomePage";
+import LoginPage from "./components/auth/LoginPage";
+import RegisterPage from "./components/auth/RegisterPage";
+import Dashboard from "./components/dashboard/Dashboard";
+import { styles } from "./styles/AppStyles";
+import AdminDashboard from "./components/admin/AdminDashboard";
 
-export default function LoginPage({ onLoginSuccess, onNavigate }) {
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
+export default function SBIApp() {
+  const [currentPage, setCurrentPage] = useState("welcome");
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [showPassword, setShowPassword] = useState(false);
-
-  const [usernameError, setUsernameError] = useState("");
-  const [passwordError, setPasswordError] = useState("");
-
-  const [userFocused, setUserFocused] = useState(false);
-  const [passFocused, setPassFocused] = useState(false);
+  const [user, setUser] = useState(null);
 
   const BASE_URL = process.env.NEXT_PUBLIC_API_URL;
 
-  const handleLogin = async (e) => {
-    e.preventDefault();
-    setLoading(true);
-    setError("");
-
-    const usernameErr = validation.username(username);
-    const passwordErr = validation.password(password);
-
-    setUsernameError(usernameErr);
-    setPasswordError(passwordErr);
-
-    if (usernameErr || passwordErr) {
-      setLoading(false);
-      return;
-    }
-
+  /*
+  ============================
+  FETCH USER PROFILE (COOKIE BASED)
+  Called AFTER /token succeeds and cookie is set
+  ============================
+  */
+  const fetchUserProfile = async () => {
     try {
-      // Step 1: Login — backend sets cookie automatically
-      const response = await fetch(`${BASE_URL}/token`, {
-        method: "POST",
-        credentials: "include",
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
-        },
-        body: new URLSearchParams({
-          username,
-          password,
-        }),
-      });
+      setLoading(true);
 
-      let data;
-      try {
-        data = await response.json();
-      } catch {
-        data = {};
-      }
-
-      if (!response.ok) {
-        throw new Error(data.detail || "Login failed");
-      }
-
-      // Step 2: Fetch user profile using cookie only (no Bearer token)
-      const fetchUser = await fetch(`${BASE_URL}/users/me`, {
+      const response = await fetch(`${BASE_URL}/users/me`, {
         method: "GET",
-        credentials: "include",
+        credentials: "include", // uses the cookie set by /token
         headers: {
-          "Content-Type": "application/json",
+          Accept: "application/json",
         },
       });
 
-      // Step 3: Safely parse the response
       let userData;
       try {
-        userData = await fetchUser.json();
+        userData = await response.json();
       } catch {
         userData = {};
       }
 
-      if (!fetchUser.ok) {
-        throw new Error("Failed to fetch user info");
+      if (!response.ok) {
+        throw new Error("Failed to fetch user data");
       }
 
-      // Step 4: Guard against undefined/null userData
       if (!userData || typeof userData !== "object") {
-        throw new Error("Invalid user data received from server");
+        throw new Error("Invalid user data received");
       }
 
-      // Step 5: Extract userType safely
-      // Backend: userType 1 = admin, anything else = regular user
-      // Handle both camelCase (userType) and snake_case (user_type) from backend
-      const userType = Number(
+      console.log("fetchUserProfile userData:", userData);
+
+      /*
+        Resolve userType:
+        - Check camelCase first (userType)
+        - Then snake_case (user_type)
+        - Default to 0 (regular user)
+        Always Number() so strict === 1 works correctly
+      */
+      const resolvedUserType = Number(
         userData.userType ?? userData.user_type ?? 0
       );
 
-      console.log("Logged in userData:", userData);
-      console.log("Resolved userType:", userType);
+      console.log("Resolved userType:", resolvedUserType);
 
-      // Step 6: Notify parent (page.js) with resolved userType
-      onLoginSuccess(userType);
+      setUser({
+        ...userData,
+        userType: resolvedUserType,
+      });
 
-      // Step 7: Navigate based on role
-      if (userType === 1) {
-        onNavigate("admin");
-      } else {
-        onNavigate("dashboard");
-      }
-
-      setUsername("");
-      setPassword("");
+      setIsLoggedIn(true);
 
     } catch (err) {
-      setError(err.message || "Invalid username or password");
+      console.error("fetchUserProfile error:", err);
+      setError(err.message);
     } finally {
       setLoading(false);
     }
   };
 
-  // ---- YOUR ORIGINAL JSX BELOW (unchanged) ----
+  /*
+  ============================
+  LOGIN SUCCESS
+  Called by LoginPage after /token succeeds
+  ============================
+  */
+  const handleLoginSuccess = async () => {
+    await fetchUserProfile();
+  };
+
+  /*
+  ============================
+  LOGOUT
+  ============================
+  */
+  const handleLogout = async () => {
+    try {
+      await fetch(`${BASE_URL}/logout`, {
+        method: "POST",
+        credentials: "include",
+      });
+    } catch (err) {
+      console.error("Logout error:", err);
+    }
+
+    setUser(null);
+    setIsLoggedIn(false);
+    setCurrentPage("welcome");
+  };
+
+  /*
+  ============================
+  LOADING SCREEN
+  ============================
+  */
+  if (loading) {
+    return (
+      <div style={styles.loadingContainer}>
+        <div style={styles.spinner}></div>
+        <p style={styles.loadingText}>Loading...</p>
+      </div>
+    );
+  }
+
+  /*
+  ============================
+  ROUTING
+  ============================
+  */
+
+  // Not logged in — show welcome/login/register
+  if (!isLoggedIn) {
+    if (currentPage === "welcome") {
+      return <WelcomePage onNavigate={setCurrentPage} />;
+    }
+    if (currentPage === "login") {
+      return (
+        <LoginPage
+          onLoginSuccess={handleLoginSuccess}
+          onNavigate={setCurrentPage}
+        />
+      );
+    }
+    if (currentPage === "register") {
+      return <RegisterPage onNavigate={setCurrentPage} />;
+    }
+  }
+
+  // Logged in — route PURELY based on userType, ignore currentPage
+  if (isLoggedIn && user) {
+    console.log("Routing for userType:", user.userType);
+
+    if (user.userType === 1) {
+      // Admin
+      return <AdminDashboard onLogout={handleLogout} />;
+    }
+    // Regular user
+    return <Dashboard user={user} onLogout={handleLogout} />;
+  }
+
+  // Fallback
   return (
-    // Keep your existing return/JSX here exactly as it was
-    <></>
+    <div style={styles.loadingContainer}>
+      <div style={styles.spinner}></div>
+      <p style={styles.loadingText}>Loading...</p>
+    </div>
   );
 }
