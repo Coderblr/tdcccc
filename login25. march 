@@ -1,0 +1,109 @@
+"use client";
+
+import { useState } from "react";
+import { validation } from "../utils/validation";
+
+export default function LoginPage({ onLoginSuccess, onNavigate }) {
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+
+  const [usernameError, setUsernameError] = useState("");
+  const [passwordError, setPasswordError] = useState("");
+
+  const [userFocused, setUserFocused] = useState(false);
+  const [passFocused, setPassFocused] = useState(false);
+
+  const BASE_URL = process.env.NEXT_PUBLIC_API_URL;
+
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setError("");
+
+    const usernameErr = validation.username(username);
+    const passwordErr = validation.password(password);
+
+    setUsernameError(usernameErr);
+    setPasswordError(passwordErr);
+
+    if (usernameErr || passwordErr) {
+      setLoading(false);
+      return;
+    }
+
+    try {
+      // Step 1: Login — backend sets cookie automatically
+      const response = await fetch(`${BASE_URL}/token`, {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: new URLSearchParams({
+          username,
+          password,
+        }),
+      });
+
+      let data;
+      try {
+        data = await response.json();
+      } catch {
+        data = {};
+      }
+
+      if (!response.ok) {
+        throw new Error(data.detail || "Login failed");
+      }
+
+      // Step 2: Fetch user profile using cookie only (no Bearer token)
+      const fetchUser = await fetch(`${BASE_URL}/users/me`, {
+        method: "GET",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+        },
+      });
+
+      if (!fetchUser.ok) {
+        throw new Error("Failed to fetch user info");
+      }
+
+      const userData = await fetchUser.json();
+
+      // Step 3: Extract userType — 1 = admin, anything else = regular user
+      // Handle both camelCase and snake_case from backend
+      const userType = Number(
+        userData?.userType ?? userData?.user_type ?? 0
+      );
+
+      // Step 4: Notify parent (page.js) with resolved userType
+      onLoginSuccess(userType);
+
+      // Step 5: Navigate based on role
+      if (userType === 1) {
+        onNavigate("admin");
+      } else {
+        onNavigate("dashboard");
+      }
+
+      setUsername("");
+      setPassword("");
+
+    } catch (err) {
+      setError(err.message || "Invalid username or password");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ---- YOUR ORIGINAL JSX BELOW (unchanged) ----
+  return (
+    // Keep your existing return/JSX here exactly as it was
+    // Only the handleLogin function above has been changed
+    <></>
+  );
+}
