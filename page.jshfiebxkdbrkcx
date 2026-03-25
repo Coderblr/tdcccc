@@ -1,0 +1,153 @@
+"use client";
+
+import { useState, useEffect } from "react";
+import WelcomePage from "./components/WelcomePage";
+import LoginPage from "./components/auth/LoginPage";
+import RegisterPage from "./components/auth/RegisterPage";
+import Dashboard from "./components/dashboard/Dashboard";
+import { styles } from "./styles/AppStyles";
+import AdminDashboard from "./components/admin/AdminDashboard";
+
+export default function SBIApp() {
+  const [currentPage, setCurrentPage] = useState("welcome");
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [user, setUser] = useState(null);
+
+  const BASE_URL = process.env.NEXT_PUBLIC_API_URL;
+
+  /*
+  ============================
+  FETCH USER PROFILE (COOKIE BASED)
+  ============================
+  */
+  const fetchUserProfile = async (userTypeFromLogin) => {
+    try {
+      setLoading(true);
+
+      const response = await fetch(`${BASE_URL}/users/me`, {
+        method: "GET",
+        credentials: "include",
+        headers: {
+          Accept: "application/json",
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to fetch user data");
+      }
+
+      const userData = await response.json();
+
+      /*
+        Resolve userType in priority order:
+        1. From the /users/me response (most reliable)
+        2. From the login callback argument (fallback)
+        Always convert to Number so strict === 1 comparison works
+      */
+      const resolvedUserType = Number(
+        userData?.userType ??
+        userData?.user_type ??
+        userTypeFromLogin ??
+        0
+      );
+
+      setUser({
+        ...userData,
+        userType: resolvedUserType,
+      });
+
+      setIsLoggedIn(true);
+
+    } catch (err) {
+      console.error("fetchUserProfile error:", err);
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  /*
+  ============================
+  LOGIN SUCCESS
+  ============================
+  */
+  const handleLoginSuccess = async (userType) => {
+    await fetchUserProfile(userType);
+  };
+
+  /*
+  ============================
+  LOGOUT
+  ============================
+  */
+  const handleLogout = async () => {
+    try {
+      await fetch(`${BASE_URL}/logout`, {
+        method: "POST",
+        credentials: "include",
+      });
+    } catch (err) {
+      console.error("Logout error:", err);
+    }
+
+    setUser(null);
+    setIsLoggedIn(false);
+    setCurrentPage("welcome");
+  };
+
+  /*
+  ============================
+  LOADING SCREEN
+  ============================
+  */
+  if (loading && !user && currentPage !== "dashboard") {
+    return (
+      <div style={styles.loadingContainer}>
+        <div style={styles.spinner}></div>
+        <p style={styles.loadingText}>Loading...</p>
+      </div>
+    );
+  }
+
+  /*
+  ============================
+  ROUTING
+  ============================
+  */
+
+  if (currentPage === "welcome" && !isLoggedIn) {
+    return <WelcomePage onNavigate={setCurrentPage} />;
+  }
+
+  if (currentPage === "login" && !isLoggedIn) {
+    return (
+      <LoginPage
+        onLoginSuccess={handleLoginSuccess}
+        onNavigate={setCurrentPage}
+      />
+    );
+  }
+
+  if (currentPage === "register" && !isLoggedIn) {
+    return <RegisterPage onNavigate={setCurrentPage} />;
+  }
+
+  // Once logged in, route strictly by userType
+  // userType === 1 → Admin, everything else → Regular user
+  if (isLoggedIn && user) {
+    if (user?.userType === 1) {
+      return <AdminDashboard onLogout={handleLogout} />;
+    }
+    return <Dashboard user={user} onLogout={handleLogout} />;
+  }
+
+  // Fallback loading
+  return (
+    <div style={styles.loadingContainer}>
+      <div style={styles.spinner}></div>
+      <p style={styles.loadingText}>Loading...</p>
+    </div>
+  );
+}
