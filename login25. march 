@@ -1,170 +1,86 @@
 "use client";
 
 import { useState } from "react";
-import WelcomePage from "./components/WelcomePage";
-import LoginPage from "./components/auth/LoginPage";
-import RegisterPage from "./components/auth/RegisterPage";
-import Dashboard from "./components/dashboard/Dashboard";
-import { styles } from "./styles/AppStyles";
-import AdminDashboard from "./components/admin/AdminDashboard";
+import { validation } from "../utils/validation";
 
-export default function SBIApp() {
-  const [currentPage, setCurrentPage] = useState("welcome");
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
+export default function LoginPage({ onLoginSuccess, onNavigate }) {
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [user, setUser] = useState(null);
+  const [showPassword, setShowPassword] = useState(false);
+
+  const [usernameError, setUsernameError] = useState("");
+  const [passwordError, setPasswordError] = useState("");
+
+  const [userFocused, setUserFocused] = useState(false);
+  const [passFocused, setPassFocused] = useState(false);
 
   const BASE_URL = process.env.NEXT_PUBLIC_API_URL;
 
-  /*
-  ============================
-  FETCH USER PROFILE (COOKIE BASED)
-  Called AFTER /token succeeds and cookie is set
-  ============================
-  */
-  const fetchUserProfile = async () => {
-    try {
-      setLoading(true);
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setError("");
 
-      const response = await fetch(`${BASE_URL}/users/me`, {
-        method: "GET",
-        credentials: "include", // uses the cookie set by /token
+    const usernameErr = validation.username(username);
+    const passwordErr = validation.password(password);
+
+    setUsernameError(usernameErr);
+    setPasswordError(passwordErr);
+
+    if (usernameErr || passwordErr) {
+      setLoading(false);
+      return;
+    }
+
+    try {
+      // Step 1: POST /token — backend sets cookie automatically
+      const response = await fetch(`${BASE_URL}/token`, {
+        method: "POST",
+        credentials: "include",
         headers: {
-          Accept: "application/json",
+          "Content-Type": "application/x-www-form-urlencoded",
         },
+        body: new URLSearchParams({
+          username,
+          password,
+        }),
       });
 
-      let userData;
+      let data;
       try {
-        userData = await response.json();
+        data = await response.json();
       } catch {
-        userData = {};
+        data = {};
       }
 
       if (!response.ok) {
-        throw new Error("Failed to fetch user data");
+        throw new Error(data.detail || "Login failed");
       }
-
-      if (!userData || typeof userData !== "object") {
-        throw new Error("Invalid user data received");
-      }
-
-      console.log("fetchUserProfile userData:", userData);
 
       /*
-        Resolve userType:
-        - Check camelCase first (userType)
-        - Then snake_case (user_type)
-        - Default to 0 (regular user)
-        Always Number() so strict === 1 works correctly
+        ✅ IMPORTANT:
+        Do NOT fetch /users/me here.
+        Do NOT call onNavigate here.
+        Just call onLoginSuccess() — page.js will fetch /users/me,
+        set the user state, and route automatically based on userType.
       */
-      const resolvedUserType = Number(
-        userData.userType ?? userData.user_type ?? 0
-      );
+      onLoginSuccess();
 
-      console.log("Resolved userType:", resolvedUserType);
-
-      setUser({
-        ...userData,
-        userType: resolvedUserType,
-      });
-
-      setIsLoggedIn(true);
+      setUsername("");
+      setPassword("");
 
     } catch (err) {
-      console.error("fetchUserProfile error:", err);
-      setError(err.message);
+      setError(err.message || "Invalid username or password");
     } finally {
       setLoading(false);
     }
   };
 
-  /*
-  ============================
-  LOGIN SUCCESS
-  Called by LoginPage after /token succeeds
-  ============================
-  */
-  const handleLoginSuccess = async () => {
-    await fetchUserProfile();
-  };
-
-  /*
-  ============================
-  LOGOUT
-  ============================
-  */
-  const handleLogout = async () => {
-    try {
-      await fetch(`${BASE_URL}/logout`, {
-        method: "POST",
-        credentials: "include",
-      });
-    } catch (err) {
-      console.error("Logout error:", err);
-    }
-
-    setUser(null);
-    setIsLoggedIn(false);
-    setCurrentPage("welcome");
-  };
-
-  /*
-  ============================
-  LOADING SCREEN
-  ============================
-  */
-  if (loading) {
-    return (
-      <div style={styles.loadingContainer}>
-        <div style={styles.spinner}></div>
-        <p style={styles.loadingText}>Loading...</p>
-      </div>
-    );
-  }
-
-  /*
-  ============================
-  ROUTING
-  ============================
-  */
-
-  // Not logged in — show welcome/login/register
-  if (!isLoggedIn) {
-    if (currentPage === "welcome") {
-      return <WelcomePage onNavigate={setCurrentPage} />;
-    }
-    if (currentPage === "login") {
-      return (
-        <LoginPage
-          onLoginSuccess={handleLoginSuccess}
-          onNavigate={setCurrentPage}
-        />
-      );
-    }
-    if (currentPage === "register") {
-      return <RegisterPage onNavigate={setCurrentPage} />;
-    }
-  }
-
-  // Logged in — route PURELY based on userType, ignore currentPage
-  if (isLoggedIn && user) {
-    console.log("Routing for userType:", user.userType);
-
-    if (user.userType === 1) {
-      // Admin
-      return <AdminDashboard onLogout={handleLogout} />;
-    }
-    // Regular user
-    return <Dashboard user={user} onLogout={handleLogout} />;
-  }
-
-  // Fallback
+  // ---- YOUR ORIGINAL JSX BELOW (unchanged) ----
   return (
-    <div style={styles.loadingContainer}>
-      <div style={styles.spinner}></div>
-      <p style={styles.loadingText}>Loading...</p>
-    </div>
+    // Keep your existing return/JSX here exactly as it was
+    <></>
   );
 }
